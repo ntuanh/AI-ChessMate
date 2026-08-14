@@ -1,0 +1,13 @@
+# --- sinh ra lúc chạy ---
+__pycache__/
+*.pyc
+*.log
+.venv/
+qnnenv/
+
+# --- dữ liệu nặng: KHÔNG đưa lên git ---
+# dataset tự dump khi nhận diện khớp 100% (xem SOLUTION.md), có thể lên tới hàng GB
+captures/dataset/
+# ảnh/âm thanh sinh ra lúc chạy; chỉ vài ảnh mẫu trong tests/frames là được theo dõi
+captures/
+!tests/frames/

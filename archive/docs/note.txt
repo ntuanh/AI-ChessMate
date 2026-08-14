@@ -1,0 +1,157 @@
+================================================================
+ NOTE - KET NOI & LAM VIEC VOI AIBOX 8550  (cap nhat: 2026-08-12)
+================================================================
+
+--------------------------------------------------------------
+1. THIET BI AIBOX
+--------------------------------------------------------------
+- Board  : Qualcomm Kalamap RB5 Gen2 (chip QCS8550) - HDK
+- OS     : Ubuntu 22.04.2 LTS (Qualcomm Linux), kernel 5.15 aarch64
+- CPU    : Kryo 8 loi | RAM: 16GB | GPU: Adreno | NPU/DSP: Hexagon (cDSP)
+- Hostname: rov-test
+- Serial USB: 79f3af64  (SN in tren may: C593BC47)
+- Ket noi hien tai: qua USB -> ADB (KHONG qua mang)
+
+--------------------------------------------------------------
+2. CACH KET NOI (tren laptop)
+--------------------------------------------------------------
+# adb ban portable dang o (co the bi xoa sau, nen cai han bang: sudo apt install adb)
+ADB=/tmp/claude-1000/-home-luongminhthu-Documents-code-KIT/5b47ed84-0c9e-496d-872c-60dcd24cb2a7/scratchpad/platform-tools/adb
+
+# USB Qualcomm can quyen root -> cho adb-server chay bang root:
+sudo "$ADB" kill-server
+sudo "$ADB" start-server
+"$ADB" devices -l        # phai thay: 79f3af64   device
+
+# Vao he dieu hanh AIBOX (dang la root, dau nhac '#'):
+"$ADB" shell
+
+# Chay 1 lenh nhanh khong can vao shell:
+"$ADB" shell "df -h"
+
+# Copy file:
+"$ADB" push file.txt /home/thunopro/     # laptop -> AIBOX
+"$ADB" pull /duong/dan/file .            # AIBOX -> laptop
+
+--------------------------------------------------------------
+0. !!! QUY TAC BAT BUOC - NGHIEM CAM XOA USER !!!
+--------------------------------------------------------------
+*** TUYET DOI KHONG DUOC XOA BAT KY USER NAO TREN AIBOX ***
+  - Cam: userdel / deluser / xoa /home/<user> cua bat ky ai.
+  - Ap dung cho TAT CA: hkt, nhchien, qrobot, thunopro, root, va moi user khac.
+  - Ke ca khi het dung luong o dia -> VAN KHONG DUOC XOA USER.
+  - Ly do: AIBOX la may dung chung cua ca lab. Moi user chua project nghien
+    cuu rieng (hkt = ROV VLA, nhchien = ORB_SLAM3, root = ai-rov underwater
+    tracking). Xoa user = mat du lieu nguoi khac, KHONG khoi phuc duoc.
+
+  Khi can cho trong: CHI duoc dep file rac da xac nhan ro rang va PHAI HOI
+  TRUOC. Vi du an toan: /root/.cache/pip, cac file .tar.gz da giai nen,
+  /data/coredump. KHONG dung vao /home/*, /root/ai-rov, /opt/qcom.
+
+--------------------------------------------------------------
+3. PROJECT "ROV" (KHONG BAO GIO DUOC XOA)
+--------------------------------------------------------------
+- La ung dung AI VLA (Vision-Language-Action): camera + lenh chu -> sinh tin hieu lai xe/robot.
+- Chay tren NPU/DSP qua bo QNN 2.47.
+- VI TRI CHINH: /home/hkt/         (user hkt)
+    + rov_vla_app        : chuong trinh chinh (binary ARM64)
+    + run.sh             : chay test: ./run.sh vision|backbone|action
+    + models/  (~3GB)    : 4 khoi model AI - KHONG XOA
+    + qnn_2.47_lib, qnn_2.47_dsp : thu vien QNN
+    + vla_inference.py, perception.py : code Python
+- Ban sao khac: /root/ai-rov   (7.4GB, cua root)
+- Trang thai: KHONG tu chay khi bat may, phai chay tay.
+
+--------------------------------------------------------------
+4. DA DON DIA (2026-08-12)
+--------------------------------------------------------------
+- Truoc: / day 99% (92GB dung).
+- Nguyen nhan: /data/coredump chua ~50.900 file crash dump cua
+  pulseaudio + sensor_service (moi file 18-85MB) = ~43GB.
+- Da xoa toan bo /data/coredump/* -> / con 53% (trong 45GB). OK.
+- LUU Y: pulseaudio + sensor_service VAN dang crash-loop.
+  core_pattern = /data/coredump/core.%e.%p  -> se lai day dan.
+  => Can sua goc, hoac tat do core dump (chua lam).
+
+--------------------------------------------------------------
+5. USER MOI: thunopro
+--------------------------------------------------------------
+- Da tao: user thunopro (uid 5006), home /home/thunopro
+- Mat khau tam: Thunopro@2026   (NEN DOI: passwd thunopro)
+- KHONG co quyen sudo.
+- Da khoa: thunopro KHONG doc duoc source cua user khac.
+  (chmod 750 cho /home/hkt, /home/nhchien, /home/qrobot; /root la 700)
+  Da test: thunopro doc /home/hkt, /home/nhchien, /root -> Permission denied.
+
+--------------------------------------------------------------
+6. INTERNET & GIT tren AIBOX
+--------------------------------------------------------------
+- git: DA CO (git 2.34.1). Config san: user=glouisin, email=demoniax.umbralux@gmail.com
+- INTERNET: HIEN TAI KHONG CO (eth0 UP nhung chua co IP -> "Network unreachable").
+- De AIBOX ra mang, chon 1 trong:
+    a) Cam day LAN co DHCP vao eth0, hoac
+    b) Dang nhap wifi HUST (xem /home/hkt/connect.py - lab NAVIS/HUST), hoac
+    c) Chia mang tu laptop qua USB (USB tethering/RNDIS).
+- Git push/pull len GitHub CHI chay duoc khi AIBOX co internet.
+
+--------------------------------------------------------------
+7. CODE O DAU?
+--------------------------------------------------------------
+- Project KIT (/home/luongminhthu/Documents/code/KIT) nam tren LAPTOP:
+  code truc tiep tren VSCode nay duoc, git tren laptop chay binh thuong.
+- Code cho AIBOX: 2 cach
+    a) Code o KIT (laptop) -> adb push sang AIBOX de chay, hoac
+    b) Code truc tiep tren AIBOX (co san VSCode Server o /root/.vscode-server).
+
+--------------------------------------------------------------
+8. PROJECT AI CO VUA (moi tao dem 2026-08-12)
+--------------------------------------------------------------
+- Code tren laptop: /home/luongminhthu/Documents/code/KIT/chess_ai/
+- Da dong bo tren AIBOX: /data/kit/chess_ai/
+- Da cai tren AIBOX: stockfish, espeak-ng, python-chess, vosk + model VN.
+- CHAY (tren AIBOX, qua adb shell):
+    cd /data/kit
+    python3 -m chess_ai.simulate --plies 40           # tu test mo phong
+    python3 -m chess_ai.main --color white --skill 12  # choi that
+    python3 -m chess_ai.main ... --listen              # dieu khien bang giong noi
+- Day code moi tu laptop: bash tools/deploy.sh
+- Xem README.md (huong dan) va STATUS.md (con gi phai lam - phan THI GIAC).
+- Internet-qua-USB dang bat: proxy laptop (tools/usb_proxy.py) + adb reverse 8899.
+
+--------------------------------------------------------------
+9. TRUY CAP AIBOX TU XA CHO CA NHOM (qua Tailscale)
+--------------------------------------------------------------
+DUONG DI:
+   Team ==Tailscale==> laptop 100.106.160.24:2222
+        ==socat==> 127.0.0.1:2223 ==adb/USB==> AIBOX:22
+
+AIBOX KHONG CAN INTERNET. Ly do khong chay Tailscale thang tren AIBOX:
+  tailscaled chi day logtail qua HTTP proxy, con control plane + WireGuard
+  (UDP) thi khong -> luon ket. Proxy HTTP la tang ung dung, Tailscale can
+  route mang tang 3 that su.
+
+LENH CHO TEAM (khong doi khi laptop doi wifi/4G):
+   ssh -p 2222 thunopro@100.106.160.24
+
+TU DONG PHUC HOI KHI RUT/CAM LAI CAP USB:
+   Service: aibox-bridge.service  (systemd --user, da enable)
+   Script : KIT/tools/aibox_bridge.sh   (vong lap 5s, tu dung lai)
+   Log    : ~/.local/state/aibox-bridge.log
+
+   Xem trang thai:  bash tools/aibox_bridge.sh --status
+   Xem log       :  journalctl --user -u aibox-bridge -f
+   Khoi dong lai :  systemctl --user restart aibox-bridge
+
+   CON THIEU (can sudo, chua chay): sudo loginctl enable-linger luongminhthu
+   -> de service chay ca khi chua dang nhap / sau reboot.
+
+CHIA QUYEN: dung "Share machine" tren admin console Tailscale, gui qua email.
+  Da share cho: ntuanh2705@, hotram2102005@, lilkiet2004@, truongduy2005910@
+  Nguoi duoc share KHONG tinh vao gioi han user cua goi Free.
+  KHONG gioi han so nguoi ket noi cung luc.
+
+LUU Y BAO MAT: team dang vao THANG AIBOX bang user thunopro (khong sudo,
+  khong doc duoc home nguoi khac) -> khong dung vao laptop cua ban. Tot.
+  => PHAI DOI mat khau thunopro (mk cu Thunopro@2026 nam trong file nay):
+     adb shell 'passwd thunopro'
+================================================================
