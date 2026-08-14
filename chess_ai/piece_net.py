@@ -14,6 +14,9 @@ pipeline giữ nguyên OccupancyModel cũ.
 """
 from __future__ import annotations
 import os
+import socket
+import struct
+import threading
 
 import numpy as np
 
@@ -28,7 +31,7 @@ CELL = 64
 # thứ tự tìm model: cạnh repo (dev laptop) rồi chỗ deploy trên AIBOX
 _MODEL_PATHS = [
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "piece_net.onnx"),
-    "/data/kit/models/piece_net.onnx",
+    os.path.join(os.environ.get("KIT_ROOT", "/home/khacthu/kit"), "models", "piece_net.onnx"),
 ]
 
 
@@ -70,6 +73,32 @@ class PieceNet:
         grid = [[CLASSES[idx[r * 8 + f]] for f in range(8)] for r in range(8)]
         return grid, conf
 
+    # nhóm chỉ số lớp theo màu, tính sẵn
+    _W = [CLASSES.index(c) for c in "PNBRQK"]
+    _B = [CLASSES.index(c) for c in "pnbrqk"]
+
+    def prob3(self, warped_bgr):
+        """→ 8×8×3 xác suất {trống, trắng, đen}. Bên gọi chấm điểm bằng xác suất
+        thay vì nhãn cứng thì một ô model lưỡng lự không giết được nước đi đúng."""
+        lg = self.logits(warped_bgr)
+        e = np.exp(lg - lg.max(axis=1, keepdims=True))
+        pr = e / e.sum(axis=1, keepdims=True)
+        return np.stack([pr[:, 0], pr[:, self._W].sum(1),
+                         pr[:, self._B].sum(1)], 1).reshape(8, 8, 3)
+
+    def read3(self, warped_bgr):
+        """→ (state 8×8 ∈ {0 trống, 1 trắng, 2 đen}, conf 8×8).
+
+        CỘNG DỒN xác suất theo màu, KHÔNG phải argmax 13 lớp rồi map: đọc nhầm
+        Tốt thành Tượng vẫn ra đúng màu, mà đó đúng là loại lỗi model hay mắc
+        trên frame thật. Ba lớp là đủ để bám nước đi — occupancy mù trước nước ăn
+        quân (ô đích có quân cả trước lẫn sau), còn màu thì thấy rõ ô đích đổi
+        chủ; quân gì thì không cần biết.
+        """
+        p3 = self.prob3(warped_bgr)
+        idx = p3.argmax(2)
+        return idx, p3.max(2)
+
     def occupancy(self, warped_bgr, conf_min=0.0):
         """8×8 bool CÓ QUÂN — thay thế trực tiếp OccupancyModel.predict."""
         grid, conf = self.predict(warped_bgr)
@@ -96,15 +125,83 @@ class PieceNet:
         return bot > top
 
 
+class NpuPieceNet(PieceNet):
+    """Cùng giao diện PieceNet nhưng suy luận trên NPU Hexagon qua sidecar.
+
+    Sidecar `tools/npu_server.py` chạy python3.12 (API QAIRT bắt buộc), nên
+    không nạp thẳng vào tiến trình này được. Đo trên AIBOX: 495ms → ~12ms.
+    Mọi trục trặc socket đều rơi về `fallback` (ONNX CPU) chứ không ném lỗi
+    lên vòng nhận diện.
+    """
+
+    def __init__(self, sock_path, fallback=None):
+        self.path = sock_path
+        self.fallback = fallback
+        self._lock = threading.Lock()
+        self.sock = None
+        self._connect()
+
+    def _connect(self):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(5.0)
+        s.connect(self.path)
+        self.sock = s
+
+    def _rpc(self, payload):
+        self.sock.sendall(struct.pack("<I", len(payload)) + payload)
+        hdr = self.sock.recv(4)
+        if len(hdr) != 4:
+            raise ConnectionError("sidecar NPU dong ket noi")
+        n = struct.unpack("<I", hdr)[0]
+        if n == 0:
+            raise RuntimeError("sidecar NPU bao loi suy luan")
+        buf = bytearray()
+        while len(buf) < n:
+            b = self.sock.recv(n - len(buf))
+            if not b:
+                raise ConnectionError("sidecar NPU dut giua chung")
+            buf += b
+        return np.frombuffer(bytes(buf), np.float32).reshape(64, 13)
+
+    def logits(self, warped_bgr):
+        # cells() trả float32 nhưng giá trị là pixel 0..255 nguyên → uint8 không
+        # mất mát, mà đường truyền nhẹ đi 4 lần (3MB → 786KB).
+        cells = self.cells(warped_bgr).astype(np.uint8)
+        with self._lock:
+            try:
+                return self._rpc(cells.tobytes())
+            except Exception:
+                try:                    # thử nối lại đúng 1 lần (sidecar restart)
+                    self._connect()
+                    return self._rpc(cells.tobytes())
+                except Exception:
+                    if self.fallback is None:
+                        raise
+                    self.sock = None
+                    return self.fallback.logits(warped_bgr)
+
+
 def load(path=None):
-    """PieceNet | None (thiếu cv2/onnxruntime/model thì im lặng trả None)."""
+    """PieceNet | None (thiếu cv2/onnxruntime/model thì im lặng trả None).
+
+    Ưu tiên NPU: nếu sidecar đang nghe ở KIT_NPU_SOCK thì dùng nó, giữ bản
+    ONNX CPU làm lưới đỡ.
+    """
     if cv2 is None:
         return None
+    cpu = None
     cands = [path] if path else _MODEL_PATHS
     for p in cands:
         if p and os.path.exists(p):
             try:
-                return PieceNet(p)
+                cpu = PieceNet(p)
             except Exception:
-                return None
-    return None
+                cpu = None
+            break
+    sock = os.environ.get("KIT_NPU_SOCK", "/tmp/kit_npu.sock")
+    if os.path.exists(sock):
+        try:
+            return NpuPieceNet(sock, fallback=cpu)
+        except Exception:
+            pass
+    return cpu

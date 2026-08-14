@@ -126,6 +126,70 @@ def board_from_grid(grid, flipped=False):
     return None
 
 
+def _pl_diff(board, grid, flipped):
+    p = placement(board, flipped)
+    return sum(1 for r in range(8) for f in range(8) if p[r][f] != grid[r][f])
+
+
+def locate_from_start(grid, flipped=False, start=None, max_plies=3):
+    """Thế cờ ĐẦY ĐỦ khớp `grid`, dò từ thế khai cuộc. None nếu không tìm thấy.
+
+    Vì sao cần: ảnh tĩnh không nói được AI ĐANG ĐI. board_from_grid() phải đoán và
+    nó thử Trắng trước — nhưng thế sau 1.e4 với "Trắng đi" vẫn là thế hợp lệ, nên
+    nó trả về sai lượt. Hậu quả không phải chậm mà là ĐỨNG IM: explain() và
+    explain_occ() chỉ liệt kê nước của bên đang đi, nên nước của bên kia không bao
+    giờ khớp được. Đúng cảnh bạn cầm Đen mà Trắng đã đi trước.
+
+    Dò từ thế khai cuộc thì lượt đi, quyền nhập thành VÀ ô bắt tốt qua đường đều là
+    dữ kiện chắc chắn chứ không phải suy đoán — cả ba thứ board_from_grid đều phải
+    đoán.
+
+    Cắt nhánh: một nước đổi nhiều nhất 4 ô (nhập thành đổi 4, thường 2), nên thế ở
+    độ sâu d còn lệch quá 4*(max_plies-d) ô thì không thể về đích — bỏ luôn. Nhờ đó
+    không phải nở hết cây nước đi.
+    """
+    root = start.copy() if start is not None else chess.Board()
+    if _pl_diff(root, grid, flipped) == 0:
+        return root
+
+    level = [root]
+    for depth in range(1, max_plies + 1):
+        budget = 4 * (max_plies - depth)
+        nxt, hit = [], []
+        for cur in level:
+            for mv in cur.legal_moves:
+                nb = cur.copy()
+                nb.push(mv)
+                d = _pl_diff(nb, grid, flipped)
+                if d == 0:
+                    hit.append(nb)
+                elif d <= budget:
+                    nxt.append(nb)
+        if hit:
+            # Nhiều đường đi tới cùng một thế là chuyện thường (chỉ đổi thứ tự
+            # nước), nên chỉ nhận khi chúng NHẤT TRÍ về những gì ảnh hưởng tới thế
+            # cờ; không nhất trí thì trả None để bên gọi rơi về đường đoán, hơn là
+            # chốt một lượt đi có thể sai.
+            #
+            # Ô bắt tốt qua đường chỉ tính khi thật sự bắt được: python-chess đặt
+            # ep_square cho MỌI nước tốt đi hai bước, nên 1.e4 c5 2.Nf3 và
+            # 1.Nf3 c5 2.e4 cho cùng thế nhưng khác ep_square — khác biệt không có
+            # hậu quả gì. Xét ep thô là tự loại chính mình ở mốc 3 nước.
+            def sig(b):
+                return (b.turn, b.castling_rights,
+                        b.ep_square if b.has_legal_en_passant() else None)
+            if len({sig(b) for b in hit}) != 1:
+                return None
+            # Cùng thế, cùng lượt, khác thứ tự nước: biên bản có thể ghi thứ tự
+            # khác thực tế, nhưng THẾ CỜ — thứ duy nhất dùng để bám nước về sau —
+            # là đúng.
+            return hit[0]
+        level = nxt
+        if not level:
+            break
+    return None
+
+
 def explain(board, target, flipped, max_plies=2):
     """Tìm chuỗi ≤ max_plies nước hợp lệ dẫn từ `board` tới đúng thế `target`.
 

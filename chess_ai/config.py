@@ -9,7 +9,8 @@ APLAY_DEVICE = None          # None = card mặc định; hoặc "plughw:0,0"
 # Piper TTS (giọng neural tự nhiên) — ưu tiên hơn espeak
 PIPER_BIN = "/data/piper/piper"
 PIPER_LIB = "/data/piper"
-PIPER_MODEL = "/data/kit/models_tts/vi.onnx"
+import os as _os
+PIPER_MODEL = _os.path.join(_os.environ.get("KIT_ROOT", "/home/khacthu/kit"), "models_tts", "vi.onnx")
 
 # Camera
 CAM_INDEX = 2                # C270 = /dev/video2

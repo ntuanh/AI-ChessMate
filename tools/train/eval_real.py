@@ -1,7 +1,7 @@
 """ĐÁNH GIÁ piece_net.onnx trên dữ liệu THẬT do coach_server dump (png + fen)
 và đo tốc độ suy luận 1 bàn (64 ô).
 
-    python3 eval_real.py --model piece_net.onnx --data /data/kit/captures/dataset
+    python3 eval_real.py --model piece_net.onnx --data ~/kit/captures/dataset
     python3 eval_real.py --model piece_net.onnx --bench        # chỉ đo tốc độ
 
 Chạy được cả trên laptop lẫn AIBOX (chỉ cần onnxruntime + cv2 + numpy + chess).

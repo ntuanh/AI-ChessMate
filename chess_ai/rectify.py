@@ -29,6 +29,8 @@ SCORE_SIZE = 256            # cỡ warp dùng khi chấm điểm (nhỏ cho nhan
 ACCEPT = 5.0                # điểm caro tối thiểu để tin một quad (đo trên bộ test
                             # captures/: frame nắn đúng 11.1–17.8, quad sai ≤ 0.9)
 MIN_INSIDE = 0.995          # bàn phải nằm gần trọn trong khung ảnh
+EARLY_ACCEPT = 10.0         # đường contour đạt mức này thì khỏi quét toàn khung
+                            # (gấp đôi ACCEPT — chỉ bỏ quét khi đã rất chắc)
 PARITY = (np.indices((8, 8)).sum(0) % 2 == 0)   # True ở ô (0,0) — a8 sáng
 
 # Tông bàn đích (BGR) — lichess brown, trùng theme đầu trong gen_cells.BOARD_THEMES
@@ -68,19 +70,50 @@ def rot_quad(quad, k):
     return np.roll(np.asarray(quad, dtype=np.float32), -k, axis=0)
 
 
-def warp(img, quad, size):
-    """Nắn vùng tứ giác thành ảnh vuông size×size.
-
-    Khi thu nhỏ mạnh, warp ở 2× rồi INTER_AREA về size: INTER_AREA là bộ lọc
-    thông thấp thật sự nên khử được moiré của ảnh soi màn hình, còn warp trực
-    tiếp (INTER_LINEAR) lấy mẫu thưa và GIỮ LẠI moiré.
-    """
+def _warp_to(img, quad, size, flags=cv2.INTER_LINEAR):
     q = np.asarray(quad, dtype=np.float32).reshape(4, 2)
-    big = size * 2
-    dst = np.array([[0, 0], [big, 0], [big, big], [0, big]], dtype=np.float32)
+    dst = np.array([[0, 0], [size, 0], [size, size], [0, size]], dtype=np.float32)
     m = cv2.getPerspectiveTransform(q, dst)
-    out = cv2.warpPerspective(img, m, (big, big), flags=cv2.INTER_LINEAR)
-    return cv2.resize(out, (size, size), interpolation=cv2.INTER_AREA)
+    return cv2.warpPerspective(img, m, (size, size), flags=flags)
+
+
+def warp(img, quad, size):
+    """Nắn vùng tứ giác thành ảnh vuông size×size, CÓ khử moiré.
+
+    Render ở 2× rồi INTER_AREA về size: INTER_AREA là bộ lọc thông thấp thật sự
+    nên xoá được moiré của ảnh soi màn hình, còn warp trực tiếp (INTER_LINEAR)
+    lấy mẫu thưa và GIỮ LẠI moiré.
+
+    Dùng cho ẢNH ĐẦU RA (đưa vào PieceNet) — nơi chất lượng ảnh quyết định độ
+    chính xác. Bước tìm kiếm thì dùng warp_fast trên ảnh đã blur sẵn.
+    """
+    return cv2.resize(_warp_to(img, quad, size * 2), (size, size),
+                      interpolation=cv2.INTER_AREA)
+
+
+def warp_fast(img, quad, size):
+    """Nắn 1 lần, KHÔNG oversample — cho bước chấm điểm (gọi hàng trăm lần/frame).
+
+    Bỏ oversample ở đây không mất khả năng chống moiré, vì `img` truyền vào đã
+    được blur một lần trước cả vòng tìm kiếm (xem `prep_gray`): lọc thông thấp
+    làm 1 lần cho cả frame thay vì lặp lại ở từng lần chấm. Đo trên AIBOX: rẻ
+    hơn ~4× số pixel phải warp.
+    """
+    return _warp_to(img, quad, size)
+
+
+def prep_gray(frame_bgr, work_width=640):
+    """Ảnh xám đã thu nhỏ + blur nhẹ, dùng cho toàn bộ bước dò/chấm điểm.
+
+    Thu nhỏ bằng INTER_AREA và blur σ=1.0 chính là phần khử moiré, làm MỘT LẦN
+    mỗi frame. Trả (gray, tỉ lệ thu nhỏ).
+    """
+    h, w = frame_bgr.shape[:2]
+    sc = work_width / float(w)
+    small = cv2.resize(frame_bgr, (work_width, int(round(h * sc))),
+                       interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    return cv2.GaussianBlur(gray, (0, 0), 1.0), sc
 
 
 # ---------------- điểm caro ----------------
@@ -131,7 +164,7 @@ def score_quad(gray, quad, size=SCORE_SIZE):
     """Điểm |caro| của một quad — dùng trị tuyệt đối để bước tinh chỉnh không bị
     kẹt ở nghiệm lệch 1 ô (parity ngược nhưng lưới vẫn trùng biên ô)."""
     try:
-        b = warp(gray, quad, size)
+        b = warp_fast(gray, quad, size)
     except cv2.error:
         return -1e9
     return abs(caro_score(cell_bg(b)))
@@ -225,6 +258,17 @@ def _from_checker_energy(gray, h, w):
     return out
 
 
+_HANN = {}
+
+
+def _hann(size):
+    """Cửa sổ Hanning 2D, cache lại — board_likeness gọi hàng nghìn lần mỗi frame."""
+    if size not in _HANN:
+        w = np.hanning(size).astype(np.float32)
+        _HANN[size] = np.outer(w, w)
+    return _HANN[size]
+
+
 def board_likeness(gray, quad, size=64):
     """Điểm "vùng này giống mảng caro 8×8", KHÔNG phụ thuộc pha lưới.
 
@@ -240,12 +284,11 @@ def board_likeness(gray, quad, size=64):
     đúng; chuẩn hoá theo tổng năng lượng để không thiên vị vùng tương phản cao.
     """
     try:
-        b = warp(gray, quad, size).astype(np.float32)
+        b = warp_fast(gray, quad, size).astype(np.float32)
     except cv2.error:
         return -1e9
     b -= b.mean()
-    win = np.hanning(size).astype(np.float32)
-    b = b * np.outer(win, win)
+    b = b * _hann(size)
     f = np.abs(np.fft.rfft2(b))
     peak = float(f[4, 4] + f[size - 4, 4])
     return peak / (float(np.sqrt((b * b).sum())) + 1e-6)
@@ -277,12 +320,12 @@ def _grid_seeds(h, w):
 def candidates(gray):
     """Danh sách quad ứng viên hình học, đã lọc thô và bỏ trùng."""
     h, w = gray.shape[:2]
-    blur = cv2.GaussianBlur(gray, (0, 0), 1.2)   # khử moiré trước khi dò cạnh
-    return _dedupe(_from_checker_energy(gray, h, w) + _from_contours(blur, h, w))
+    # `gray` vào đây đã qua prep_gray (thu nhỏ INTER_AREA + blur) nên không blur lại
+    return _dedupe(_from_checker_energy(gray, h, w) + _from_contours(gray, h, w))
 
 
 # ---------------- tinh chỉnh 4 góc ----------------
-def _hill_climb(gray, quad, score, steps):
+def _hill_climb(gray, quad, score, steps, rounds=6):
     """Leo đồi từng toạ độ: thử dịch mỗi góc theo x/y với bước giảm dần, giữ lại
     thay đổi nào làm `score` tăng. Quad suy biến bị loại ngay trong vòng lặp."""
     h, w = gray.shape[:2]
@@ -291,7 +334,7 @@ def _hill_climb(gray, quad, score, steps):
     diag = np.linalg.norm(best[2] - best[0])
     for st in steps:
         d = st * diag
-        for _ in range(6):                       # trần vòng lặp: tránh kẹt lâu
+        for _ in range(rounds):                  # trần vòng lặp: tránh kẹt lâu
             moved = False
             for i in range(4):
                 for ax in (0, 1):
@@ -330,6 +373,18 @@ def _phase_sweep(gray, quad, size):
     return best, bs
 
 
+def lock_on(gray, quad):
+    """TẦNG 1 tách riêng: bám khối bàn bằng board_likeness.
+
+    Tách ra vì đây là tầng QUYẾT ĐỊNH mồi nào đáng theo, và nó rẻ nhất (mục tiêu
+    trơn, warp chỉ 64px). Nhờ vậy detect() sàng 12 mồi bằng tầng này rồi mới trả
+    giá cho tầng 2–3 ở 3 mồi dẫn đầu — đo trên AIBOX: full refine tốn ~180-400ms
+    mỗi mồi, nên bỏ 9 lần chạy vô ích là phần tiết kiệm lớn nhất.
+    """
+    return _hill_climb(gray, quad, lambda x: board_likeness(gray, x),
+                       (0.06, 0.03, 0.015, 0.008))
+
+
 def refine(gray, quad, size=SCORE_SIZE):
     """Tinh chỉnh 4 góc theo 3 tầng, mỗi tầng gỡ một loại lệch khác nhau:
 
@@ -341,8 +396,7 @@ def refine(gray, quad, size=SCORE_SIZE):
     Thứ tự này quan trọng: chạy caro ngay từ mồi thô thì đứng im tại chỗ, đo được
     trên captures/chk1.jpg (mồi tốt vẫn chỉ lên 2.6 trong khi quad thật đạt 13.3).
     """
-    q, _ = _hill_climb(gray, quad, lambda x: board_likeness(gray, x),
-                       (0.06, 0.03, 0.015, 0.008))
+    q, _ = lock_on(gray, quad)
     q, _ = _phase_sweep(gray, q, size)
     return _hill_climb(gray, q, lambda x: score_quad(gray, x, size),
                        (0.03, 0.015, 0.008, 0.004))
@@ -395,33 +449,65 @@ def detect(frame_bgr, work_width=640):
     về thang ảnh gốc. Cuối cùng chỉnh parity: nếu ô (0,0) đang tối thì xoay quad
     1 nấc để về chuẩn lichess (a8 sáng).
     """
-    h, w = frame_bgr.shape[:2]
-    sc = work_width / float(w)
-    small = cv2.resize(frame_bgr, (work_width, int(round(h * sc))),
-                       interpolation=cv2.INTER_AREA)
-    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    gray, sc = prep_gray(frame_bgr, work_width)
     gh, gw = gray.shape[:2]
 
     # Sàng 3 tầng, mỗi tầng đắt hơn tầng trước ~10 lần nên phải lọc dần:
     #   1. gộp mồi hình học + mồi rải khắp khung, xếp hạng bằng board_likeness
     #   2. tinh chỉnh 12 mồi dẫn đầu ở cỡ 128 (nhanh)
     #   3. tinh chỉnh lại 3 mồi dẫn đầu ở cỡ đầy đủ
-    seeds = [q for q in candidates(gray) + _grid_seeds(gh, gw)
-             if _quad_ok(q, gh, gw)]
-    seeds.sort(key=lambda q: -board_likeness(gray, q))
-    rough = sorted((refine(gray, q, 128) for q in seeds[:12]),
-                   key=lambda x: -x[1])[:3]
-    out = [refine(gray, q, SCORE_SIZE) for q, _ in rough]
-    out = [(q, s) for q, s in out if _quad_ok(q, gh, gw)]
-    if not out:
-        return None, 0.0
-    best_q, best_s = max(out, key=lambda x: x[1])
+    def best_of(seeds, top=3):
+        """Sàng bằng tầng 1 (rẻ) rồi chỉ trả giá full refine cho `top` mồi dẫn đầu."""
+        seeds = [q for q in seeds if _quad_ok(q, gh, gw)]
+        if not seeds:
+            return None, -1e9
+        seeds.sort(key=lambda q: -board_likeness(gray, q))
+        locked = sorted((lock_on(gray, q) for q in seeds[:12]), key=lambda x: -x[1])
+        out = [refine(gray, q, SCORE_SIZE) for q, _ in locked[:top]]
+        out = [(q, s) for q, s in out if _quad_ok(q, gh, gw)]
+        return max(out, key=lambda x: x[1]) if out else (None, -1e9)
 
+    # Thử đường hình học trước: nó chỉ có vài ứng viên nên rẻ. Đạt EARLY_ACCEPT
+    # (gấp đôi ngưỡng tin) thì DỪNG, khỏi quét 600 mồi toàn khung — đo trên AIBOX
+    # riêng bước quét đó đã tốn ~350ms xếp hạng + ~150ms mỗi mồi sàng.
+    # Chỉ bỏ quét khi quad đã tự chứng minh rất chắc, nên không nới lỏng gì.
+    best_q, best_s = best_of(candidates(gray))
+    if best_q is None or best_s < EARLY_ACCEPT:
+        gq, gs = best_of(_grid_seeds(gh, gw))
+        if gq is not None and gs > best_s:
+            best_q, best_s = gq, gs
+    if best_q is None:
+        return None, 0.0
+
+    if caro_score(cell_bg(warp_fast(gray, best_q, SCORE_SIZE))) < 0:
+        best_q = rot_quad(best_q, 1)
     quad = best_q / sc
-    if caro_score(cell_bg(warp(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY),
-                              quad, SCORE_SIZE))) < 0:
-        quad = rot_quad(quad, 1)
     return quad.astype(np.float32), float(best_s)
+
+
+def verify(frame_bgr, quad, work_width=640):
+    """Kiểm lại một quad ĐÃ BIẾT (lần canh bàn trước) mà không quét toàn khung.
+
+    Dùng ĐÚNG bộ tinh chỉnh 3 tầng của detect(), rồi đòi ĐÚNG ngưỡng ACCEPT và
+    đúng ràng buộc hình học _quad_ok. Không có chỗ nào được nới: quad cũ phải tự
+    chứng minh lại trên frame hiện tại, camera xê dịch hay bàn đổi chỗ là nó tụt
+    điểm và bị loại, khi đó bên gọi quay về detect() đầy đủ. Chỗ tiết kiệm duy nhất
+    là không rải 600 mồi khắp khung — riêng bước đó đã tốn ~350ms xếp hạng cộng
+    ~150ms mỗi mồi sàng trên AIBOX.
+
+    Trả (quad ảnh gốc, score) hoặc (None, score).
+    """
+    gray, sc = prep_gray(frame_bgr, work_width)
+    gh, gw = gray.shape[:2]
+    q = np.asarray(quad, dtype=np.float32).reshape(4, 2) * sc
+    if not _quad_ok(q, gh, gw):
+        return None, 0.0
+    q, s = refine(gray, q, SCORE_SIZE)
+    if not _quad_ok(q, gh, gw) or s < ACCEPT:
+        return None, float(s)
+    if caro_score(cell_bg(warp_fast(gray, q, SCORE_SIZE))) < 0:
+        q = rot_quad(q, 1)
+    return (q / sc).astype(np.float32), float(s)
 
 
 class Tracker:
@@ -442,23 +528,22 @@ class Tracker:
         self.misses = 0
 
     def _small(self, frame_bgr):
-        h, w = frame_bgr.shape[:2]
-        sc = self.work_width / float(w)
-        small = cv2.resize(frame_bgr, (self.work_width, int(round(h * sc))),
-                           interpolation=cv2.INTER_AREA)
-        return cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), sc
+        return prep_gray(frame_bgr, self.work_width)
 
     def update(self, frame_bgr):
         """Trả (quad, score, mode) với mode ∈ {"BÁM", "DÒ LẠI", "MẤT BÀN"}."""
         gray, sc = self._small(frame_bgr)
+        # Ngân sách nhỏ: giữa hai frame liền nhau bàn gần như không dịch, nên chỉ
+        # cần bước tinh. Nếu vẫn không đạt ngưỡng thì bậc thang phía dưới (quét
+        # pha → dò lại toàn khung) mới lo, nên siết ở đây KHÔNG hạ độ chính xác.
         q, s = _hill_climb(gray, self.quad * sc,
                            lambda x: score_quad(gray, x, 128),
-                           (0.012, 0.006, 0.003))
+                           (0.008, 0.004), rounds=3)
         if s < ACCEPT:                           # thử gỡ lệch pha trước khi bỏ
             q2, s2 = _phase_sweep(gray, q, 128)
             if s2 > s:
                 q, s = _hill_climb(gray, q2, lambda x: score_quad(gray, x, 128),
-                                   (0.012, 0.006, 0.003))
+                                   (0.012, 0.006, 0.003), rounds=4)
         if s >= ACCEPT:
             self.quad, self.score, self.misses = q / sc, s, 0
             return self.quad, s, "BÁM"
@@ -489,8 +574,8 @@ def rectify(frame_bgr, quad=None, normalize=True):
                              np.zeros((4, 2), np.float32), 0.0, 0.0, False)
     else:
         quad = np.asarray(quad, dtype=np.float32).reshape(4, 2)
-        g = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-        score = abs(caro_score(cell_bg(warp(g, quad, SCORE_SIZE))))
+        g, sc = prep_gray(frame_bgr)
+        score = score_quad(g, quad * sc, SCORE_SIZE)
 
     board = warp(frame_bgr, quad, SIZE)
     if normalize:

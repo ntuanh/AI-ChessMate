@@ -95,11 +95,13 @@ def caro_score(warped_gray):
     return max(-99.0, min(99.0, sc)), bg           # chặn trần (ảnh render sạch -> vô cực)
 
 
+CARO = (np.add.outer(np.arange(8), np.arange(8)) % 2) == 0   # ô sáng của bàn cờ
+
+
 def board_contrast(bg):
     """Chênh lệch sáng/tối của nền bàn — dùng chuẩn hoá đặc trưng occupancy
     để miễn nhiễm với auto-exposure của camera."""
-    mask = (np.add.outer(np.arange(8), np.arange(8)) % 2) == 0
-    return abs(float(bg[mask].mean() - bg[~mask].mean())) + 1e-6
+    return abs(float(bg[CARO].mean() - bg[~CARO].mean())) + 1e-6
 
 
 # ---------------- dò bàn từ đầu (chạy khi mất dấu) ----------------
@@ -278,20 +280,105 @@ START_MASK[0:2, :] = True    # rank 8,7 (hàng trên ảnh)
 START_MASK[6:8, :] = True    # rank 2,1
 
 
+GRID_SPAN = 8          # biên độ căn lại lưới, tính bằng pixel trên ảnh warp 512
+
+
+def _cell_bg_box(ii, box):
+    """cell_bg nhưng cho một hộp bàn tuỳ ý, dùng lại ảnh tích phân đã dựng sẵn."""
+    x0, y0, x1, y1 = box
+    sx, sy = (x1 - x0) / 8.0, (y1 - y0) / 8.0
+    half = max(2, int(min(sx, sy) * 0.07))
+    H, W = ii.shape[0] - 1, ii.shape[1] - 1
+    cx = np.add.outer(np.arange(8), (0.16, 0.84)).ravel() * sx + x0
+    cy = np.add.outer(np.arange(8), (0.16, 0.84)).ravel() * sy + y0
+    lox = np.clip((cx - half).astype(int), 0, W)
+    hix = np.clip((cx + half).astype(int), 0, W)
+    loy = np.clip((cy - half).astype(int), 0, H)
+    hiy = np.clip((cy + half).astype(int), 0, H)
+    area = (hiy[:, None] - loy[:, None]) * (hix[None, :] - lox[None, :]) + 1e-6
+    s = (ii[hiy[:, None], hix[None, :]] - ii[loy[:, None], hix[None, :]]
+         - ii[hiy[:, None], lox[None, :]] + ii[loy[:, None], lox[None, :]])
+    quads = (s / area).reshape(8, 2, 8, 2).transpose(0, 2, 1, 3).reshape(8, 8, 4)
+    return np.median(quads, axis=2).astype(np.float32)
+
+
+_LAST_BOX = {}         # shape ảnh -> hộp bàn của khung trước (xem `grid_box`)
+
+
+def grid_box(gray, span=GRID_SPAN, init=None, ii=None):
+    """Căn lại lưới 8×8 NGAY TRÊN ẢNH WARP → hộp bàn (x0,y0,x1,y1).
+
+    Vì sao cần, dù `rectify` đã nắn: warp chỉ cần quad đúng ~vài pixel là đạt
+    ngưỡng caro, nhưng lõi ô chỉ cách mép ô đúng 15px (m = 0.24×64). Đo trên
+    1000 khung thật, mép trái warp còn dính ~14px nền ngoài bàn — biên an toàn
+    của cột a gần như bằng 0, nên hễ camera rung là dải nền trắng lọt vào lõi và
+    ô trống bị đọc thành CÓ QUÂN. Đó là nguồn gốc 121/291 ô báo thừa dồn vào một
+    cột duy nhất.
+
+    Leo đồi trên TƯƠNG PHẢN CARO của nền ô (sáng/tối xen kẽ), bốn cạnh ĐỘC LẬP:
+    lệch thường chỉ ở một cạnh, nên co đều cả bốn là tự kéo lệch cả lưới — đã đo
+    và nó tụt xuống 73,5%.
+    """
+    H, W = gray.shape[:2]
+    # Biên độ tính THEO TỈ LỆ ảnh: dataset thật lẫn cả warp 512 lẫn 800, và một
+    # hằng số pixel cứng sẽ siết quá chặt ở cỡ này và quá lỏng ở cỡ kia.
+    span = max(4.0, span * W / 512.0)
+    if ii is None:
+        ii = cv2.integral(gray.astype(np.float32))
+    goc = [0.0, 0.0, float(W), float(H)]
+
+    def sc(b):
+        bg = _cell_bg_box(ii, b)
+        return abs(float(bg[CARO].mean() - bg[~CARO].mean()))
+
+    # Khởi từ lưới của khung TRƯỚC, đúng cách `rectify.Tracker` bám quad: giữa hai
+    # khung liền nhau lưới gần như không dịch, nên chỉ cần bước tinh. Leo lại từ
+    # đầu mỗi khung tốn ~12 ms — nhiều hơn cả `rectify` — mà kết quả y hệt.
+    box = list(init) if init is not None else [0.0, 0.0, float(W), float(H)]
+    buoc = (2, 1) if init is not None else (8, 4, 2, 1)
+    best = sc(box)
+    for step in buoc:
+        moved = True
+        while moved:
+            moved = False
+            for e in range(4):
+                for d in (-step, step):
+                    nb = list(box)
+                    nb[e] += d
+                    if abs(nb[e] - goc[e]) > span:
+                        continue
+                    if not (0 <= nb[0] < nb[2] <= W and 0 <= nb[1] < nb[3] <= H):
+                        continue
+                    s = sc(nb)
+                    if s > best + 1e-6:
+                        box, best, moved = nb, s, True
+    return box
+
+
 def _features(warped_bgr):
     """(8,8,2) đặc trưng mỗi ô, đã CHUẨN HOÁ theo độ tương phản bàn (chống auto-exposure):
-       f0 = độ gồ ghề lõi ô (std)   f1 = lệch màu lõi ô so với nền ước lượng của ô."""
+       f0 = độ gồ ghề lõi ô (std)   f1 = lệch màu lõi ô so với nền ước lượng của ô.
+
+    Lưới được CĂN LẠI trên chính ảnh warp trước khi cắt ô (xem `grid_box`). Đo
+    trên 1000 khung thật: khung khớp 100% 86,9% → 90,6%, ô báo thừa 291 → 185,
+    và khung lệch ≥2 ô — đúng cái đẩy hệ thống vào đường nở cây 282 ms — 72 → 48.
+    """
     gray = cv2.cvtColor(warped_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    bg = cell_bg(gray)
-    contrast = board_contrast(bg)
-    W = gray.shape[0]
-    step = W // 8
-    m = int(step * 0.24)
+    ii = cv2.integral(gray)                       # dựng MỘT lần, dùng cho cả hai
+    box = grid_box(gray, init=_LAST_BOX.get(gray.shape), ii=ii)
+    _LAST_BOX[gray.shape] = box
+    x0, y0, x1, y1 = box
+    sx, sy = (x1 - x0) / 8.0, (y1 - y0) / 8.0
+    bg = _cell_bg_box(ii, box)
+    contrast = abs(float(bg[CARO].mean() - bg[~CARO].mean())) + 1e-6
+    mx, my = int(sx * 0.24), int(sy * 0.24)
     feats = np.zeros((8, 8, 2), dtype=np.float32)
     for r in range(8):
         for f in range(8):
-            inner = gray[r * step + m:(r + 1) * step - m,
-                         f * step + m:(f + 1) * step - m]
+            inner = gray[int(y0 + r * sy) + my:int(y0 + (r + 1) * sy) - my,
+                         int(x0 + f * sx) + mx:int(x0 + (f + 1) * sx) - mx]
+            if inner.size == 0:
+                continue
             feats[r, f, 0] = inner.std() / contrast
             feats[r, f, 1] = np.abs(inner - bg[r, f]).mean() / contrast
     return feats

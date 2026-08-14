@@ -8,7 +8,7 @@ import os, sys, time
 import numpy as np
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-sys.path.insert(0, "/data/kit")
+sys.path.insert(0, os.environ.get("KIT_ROOT", "/home/khacthu/kit"))
 from chess_ai import vision
 import cv2
 
