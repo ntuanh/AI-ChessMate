@@ -1,4 +1,7 @@
-# KIT — Huấn luyện viên cờ vua nhìn qua camera, chạy trọn trên AIBOX 8550
+# AI-ChessMate (KIT) — Huấn luyện viên cờ vua nhìn qua camera, chạy trọn trên AIBOX 8550
+
+*AI chess companion with board detection, piece tracking, Stockfish analysis, and
+on-device inference on the Hexagon NPU.*
 
 Camera Logitech C270 cắm vào AIBOX, soi vào bàn cờ Lichess trên màn hình laptop.
 Hệ thống dựng lại thế cờ, bám từng nước đi, và gợi ý nước tốt nhất bằng Stockfish.
