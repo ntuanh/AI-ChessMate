@@ -474,41 +474,6 @@ chúng tôi vẫn chứng minh được hệ thống hoạt động và vẫn đ
 5. Lấy tay che một góc bàn: hệ thống **từ chối đoán** thay vì đoán bừa, rồi tự hồi
    phục khi bỏ tay ra.
 
-## 13. Gợi ý dàn ý slide (20 phút)
-
-Ban tổ chức khuyên ưu tiên demo và cách triển khai model, tránh giới thiệu chung
-dài dòng. Dàn ý dưới đây theo đúng tinh thần đó.
-
-| Phút | Nội dung | Ghi chú trình bày |
-|---|---|---|
-| 0–2 | **Mở màn bằng demo luôn**, không slide giới thiệu | Chiếu cảnh rút dây laptop mà hệ thống vẫn chạy. Nói: *"Cái laptop này chỉ là màn hình thôi ạ. Rút ra vẫn chạy."* |
-| 2–4 | Bài toán: 98% mỗi ô nghe rất giỏi, nhưng cả bàn chỉ 85,2% | Một slide, hai con số, để khán giả tự thấy vấn đề |
-| 4–7 | **Ý tưởng cốt lõi**: luật cờ làm bộ lọc, không phải bộ sinh | Sơ đồ 4 dòng ở mục 2. Con số: 282 ms → 10,5 ms |
-| 7–12 | **Chuỗi Edge AI đầy đủ** (phần nặng ký nhất) | Sơ đồ 7 bước ở mục 5. Nhấn: 479 ms → 9,8 ms, **INT8 trùng 100% với fp32** |
-| 12–16 | **Demo trực tiếp** + bảng chẩn đoán | Đi vài nước, có nước ăn quân. Chỉ vào số liệu đang chạy |
-| 16–18 | Kết quả và ba lỗi tìm được nhờ đo | Bảng "trước/sau" ở mục 6 |
-| 18–20 | Hỏi đáp | |
-
-### Vài câu mở đầu cho đỡ khô
-
-- *"Tụi em không dạy máy chơi cờ. Cờ thì Stockfish giỏi hơn tụi em nhiều rồi. Tụi
-  em dạy máy **nhìn** bàn cờ."*
-- *"Model đọc đúng 98% mỗi ô. Nghe giỏi đúng không ạ? Nhưng bàn cờ có 64 ô, và
-  phải đúng hết cùng lúc. 98% mỗi ô ra 85% cả bàn — tức là cứ 7 khung hình thì có
-  1 khung nhìn ra thế cờ sai."*
-- *"Chỗ này tụi em sai. Cơ chế tự sửa lỗi mà tụi em rất tự hào ấy ạ — đo ra mới
-  biết nó đang làm hệ thống **tệ đi** 3%."* (thành thật thường ăn điểm)
-- Về NPU: *"CPU chạy hết 479 mili giây. NPU: 9,8. Nhanh hơn 49 lần, mà độ chính
-  xác thì **trùng khít 100%**, không mất một ô nào."*
-
-### Ba con số nên nhắc đi nhắc lại
-
-Nếu ban giám khảo chỉ nhớ được ba điều, hãy để họ nhớ ba điều này:
-
-1. **9,8 ms trên NPU** — nhanh hơn CPU 49 lần, độ chính xác không mất gì.
-2. **0,4 giây** từ lúc người chơi đi tới lúc hệ thống nhận ra.
-3. **Rút laptop ra vẫn chạy** — mọi thứ nằm trên thiết bị.
-
 ## 14. Hướng đi tiếp
 
 **Đổi vai hai nguồn đọc.** Khi đối chứng công bằng trên cùng 1000 khung, mạng CNN
