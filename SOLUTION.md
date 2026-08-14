@@ -15,8 +15,8 @@ Giao diện: `http://127.0.0.1:8090`
 | Tiêu chí | Ở đâu trong tài liệu | Bằng chứng ngắn gọn |
 |---|---|---|
 | **Tính sáng tạo** | Mục 2, 3 | Dùng luật cờ vua làm **bộ lọc** thay vì bộ sinh: 282 ms → 10,5 ms, và 96,4% chốt ngay. Neo vào thế cờ nên đọc nhầm một khung chỉ gây chậm chứ không gây lệch. |
-| **Đúng tinh thần Edge AI** | Mục 5, 6 | CNN chạy trên **NPU Hexagon HTP** của AIBOX 8550, INT8, 9,8 ms. Thị giác + mô hình + Stockfish + web đều trên thiết bị. **Rút dây laptop ra, hệ thống vẫn chạy** — laptop chỉ là màn hình. |
-| **Làm chủ quy trình model → convert → optimize → deploy → app** | Mục 5 (toàn bộ chuỗi) | Tự sinh dữ liệu → train PyTorch → ONNX → DLC → lượng tử hoá INT8 bằng ảnh thật → đối chiếu độ chính xác → systemd tự chạy khi bật máy → ứng dụng web. Mỗi mắt xích đều có script chạy lại được. |
+| **Đúng tinh thần Edge AI** | Mục 5, 5b | **Hai mô hình** cùng chạy trên NPU Hexagon HTP: PieceNet (thị giác, 9,8 ms) và Whisper-Small (giọng nói tiếng Việt). Thị giác + mô hình + Stockfish + web đều trên thiết bị. **Rút dây laptop ra, hệ thống vẫn chạy** — laptop chỉ là màn hình. |
+| **Làm chủ quy trình model → convert → optimize → deploy → app** | Mục 5 (toàn bộ chuỗi), 5b | Tự sinh dữ liệu → train PyTorch → ONNX → DLC → lượng tử hoá INT8 bằng ảnh thật → đối chiếu độ chính xác → systemd tự chạy khi bật máy → ứng dụng web. Mỗi mắt xích đều có script chạy lại được. |
 | **Demo hoạt động thực tế** | Mục 11, 12 | Chạy thật với camera C270, có bảng chẩn đoán số liệu ngay trên giao diện. Kịch bản demo và phương án dự phòng ở mục 12. |
 
 ---
@@ -216,6 +216,66 @@ Ghi lại đầy đủ, vì mỗi cái đều tốn hàng giờ:
 
 Máy chủ web ba luồng ngay trên AIBOX, kèm bảng chẩn đoán trực tiếp (mục 11).
 
+---
+
+## 5b. Mô hình thứ hai trên NPU: ra lệnh bằng giọng nói tiếng Việt
+
+Ngoài `PieceNet`, chúng tôi đưa thêm **Whisper-Small lượng tử hoá** lên chính con
+NPU đó, để điều khiển hệ thống bằng tiếng Việt:
+
+```
+nói "đánh cho tôi nước tiếp theo"
+  → Whisper-Small trên Hexagon NPU  (~1 s)  → chữ
+  → lớp hiểu lệnh                           → goi_y
+  → Stockfish                               → hiện + đọc "Nước đi tốt nhất: e4"
+```
+
+Encoder và decoder là hai QNN context binary riêng: encoder chạy **một lần** mỗi
+câu nói, decoder chạy **một lần mỗi token** sinh ra. Hai chi tiết khiến việc nối
+chuỗi khớp từng byte, đọc thẳng từ `metadata.json`:
+
+- các cache `k/v_cache_self_*_out` mang **đúng cùng** scale và zero-point với
+  `..._in`, nên cache đầu ra của một bước được đưa thẳng vào bước sau mà không
+  phải lượng tử hoá lại;
+- cache cross-attention của encoder khớp đầu vào decoder cùng tên, nên chỉ ghi
+  một lần rồi tái sử dụng cho mọi token.
+
+### Bài học đắt nhất: mô hình bịa rất trôi chảy
+
+Whisper **bịa** khi nghe tiếng ồn. Trên chính board này, tiếng ồn phòng nhiều lần
+cho ra câu *"Hãy subscribe cho kênh Ghiền Mì Gõ…"* — một câu hoàn chỉnh, tự tin,
+và hoàn toàn không có thật. Nếu không chặn, mọi lớp phía sau sẽ xử lý một mệnh
+lệnh bịa và engine sẽ **thi hành nó thật**.
+
+Nên kiến trúc ba lớp, mà **thứ tự quan trọng hơn bản thân từng lớp**:
+
+1. **Cổng tin cậy đứng đầu.** Điều thú vị: chỉ số `no_speech` có sẵn của Whisper
+   **vô dụng trên board này** — cho 0,72–0,90 với cả tiếng nói sạch lẫn im lặng.
+   Phải dùng `avg_logprob` với ngưỡng −1,0 mới tách được.
+2. **Khớp từ khoá** — 0–1 ms, phủ hầu hết cách nói thường gặp.
+3. **Mô hình ngôn ngữ đứng cuối, và bị ràng buộc bằng grammar GBNF** vào đúng tập
+   lệnh cho phép, trong đó luôn có `khong_hieu` để nó còn đường từ chối.
+
+**Vì sao mô hình ngôn ngữ phải đứng cuối và phải bị ràng buộc:** đưa thẳng chữ
+nhận dạng thô cho nó và bảo "sửa lại giúp" thì một câu quảng cáo YouTube sẽ được
+biến thành một mệnh lệnh cờ nghe rất hợp lý — tức là **rửa nhiễu thành mệnh lệnh**.
+
+Bù lại, nó làm được đúng việc mà từ khoá chịu thua: đọc xuyên qua chữ nghe lệch.
+Mô hình lượng tử hoá nghe "tấn công cánh phải" thành "tính công cảnh phải" — sai
+2/4 âm tiết, biểu thức chính quy bó tay, mô hình ngôn ngữ vẫn hiểu.
+
+Một đánh đổi đã đo: có grammar thì llama.cpp phải kiểm ràng buộc trên toàn bộ
+151.936 token ở **mỗi bước**, tốc độ tụt từ ~6 xuống ~1,7 token/giây. Nghĩa là độ
+dài câu trả lời **chính là** độ trễ — nên bắt nó trả lời đúng **một từ**.
+
+`tools/test_voice.py` chạy được cả chuỗi mà không cần người ngồi trước micro: dùng
+giọng tổng hợp thay lời nói, nhưng âm thanh thật, log-mel thật, NPU thật.
+
+> **Trạng thái:** đã chạy được và kiểm chứng riêng, **chưa đấu vào `coach_server`**.
+> Mã nguồn ở `chess_ai/voice.py`, `whisper/`, `tools/install_voice.sh`. File trọng
+> số (`encoder.bin`, `decoder.bin` — 358 MB) không đưa lên GitHub; `install_voice.sh`
+> chép chúng vào đúng chỗ trên thiết bị.
+
 ## 6. Ba lỗi tìm ra bằng cách mô phỏng lại trên dữ liệu thật
 
 Chúng tôi dựng một bộ phát lại (`tools/replay_server.py`) chạy đúng vòng nhận diện
@@ -327,7 +387,8 @@ chess_ai/            thư viện lõi
   render.py          vẽ bàn cờ đối chiếu
   speaker.py         đọc to
   vision.py          tiện ích camera
-  llm.py             nối mô hình ngôn ngữ (chưa dùng trong đường chạy chính)
+  voice.py           LỆNH BẰNG GIỌNG NÓI: Whisper (NPU) → hiểu lệnh → coach
+  llm.py             nối mô hình ngôn ngữ (dùng ở lớp 3 của đường giọng nói)
 
 tools/
   coach_server.py    máy chủ web + ba luồng + toàn bộ vòng nhận diện
@@ -336,7 +397,14 @@ tools/
   build_npu.sh       dựng mô hình INT8 cho NPU (chạy một lần)
   install_aibox.sh   cài dịch vụ systemd, tự chạy khi bật máy
   run_aibox.sh       đẩy code mới + khởi động lại
+  install_voice.sh   cài bộ Whisper lên thiết bị (chạy một lần)
+  test_voice.py      kiểm chứng cả chuỗi giọng nói, không cần micro
   train/             sinh dữ liệu và huấn luyện PieceNet
+
+whisper/             Whisper-Small lượng tử hoá chạy trên NPU
+  whisper_npu.py     điều khiển encoder/decoder qua QNN
+  asr.py             log-mel, greedy search, cổng tin cậy chống bịa
+  (encoder.bin, decoder.bin — 358 MB, không đưa lên GitHub)
 
 tests/
   test_reader.py     31 phép thử, không cần camera hay mô hình
