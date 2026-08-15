@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-ChessMate</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1c1f26;
+    --line: #2c313b;
+    --ink: #e6e8ec;
+    --muted: #8b93a3;
+    --light: #ebecd0;
+    --dark: #739552;
+    --accent: #f0b429;
+    --good: #6fbf73;
+    --bad: #e05252;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+    display: flex;
+    justify-content: center;
+  }
+  .app { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+
+  h1 { font-size: 18px; margin: 0 0 2px; letter-spacing: .2px; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+
+  /* ---- board -------------------------------------------------------- */
+  .board-wrap { display: flex; gap: 10px; }
+  .evalbar {
+    width: 16px; height: 512px; border-radius: 8px; overflow: hidden;
+    background: #2b2b2b; border: 1px solid var(--line); position: relative;
+  }
+  .evalbar .white {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 50%;
+    background: #f0f0f0; transition: height .35s ease;
+  }
+  .board {
+    position: relative; width: 512px; height: 512px;
+    display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+    border-radius: 8px; overflow: hidden; border: 1px solid var(--line);
+    user-select: none;
+  }
+  .sq {
+    position: relative; display: flex; align-items: center; justify-content: center;
+    font-size: 46px; line-height: 1; cursor: pointer;
+  }
+  .sq.light { background: var(--light); }
+  .sq.dark  { background: var(--dark); }
+  .sq .coord {
+    position: absolute; font-size: 10px; font-weight: 600; opacity: .55; color: #1d2b12;
+  }
+  .sq.dark .coord { color: #e9edd8; }
+  .coord.file { right: 3px; bottom: 1px; }
+  .coord.rank { left: 3px; top: 1px; }
+
+  .piece.w { color: #fff; text-shadow: 0 0 1px #222, 0 1px 2px rgba(0,0,0,.55), 0 0 3px #333; }
+  .piece.b { color: #262626; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
+
+  .sq.sel::after {
+    content: ""; position: absolute; inset: 0; background: rgba(240,180,41,.45);
+  }
+  .sq.last::after {
+    content: ""; position: absolute; inset: 0; background: rgba(240,180,41,.25);
+  }
+  .sq.check::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(circle, rgba(224,82,82,.85) 20%, transparent 72%);
+  }
+  .dot {
+    position: absolute; width: 26%; height: 26%; border-radius: 50%;
+    background: rgba(20,22,26,.35); pointer-events: none;
+  }
+  .dot.capture {
+    width: 88%; height: 88%; background: transparent;
+    border: 5px solid rgba(20,22,26,.32);
+  }
+  #arrows { position: absolute; inset: 0; pointer-events: none; }
+
+  /* ---- panel -------------------------------------------------------- */
+  .panel {
+    width: 320px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px;
+  }
+  .status {
+    font-weight: 600; padding: 9px 12px; border-radius: 7px;
+    background: #232830; border-left: 3px solid var(--accent); margin-bottom: 12px;
+  }
+  .hint-box {
+    background: #232830; border-radius: 7px; padding: 12px; margin-bottom: 12px;
+    min-height: 74px;
+  }
+  .hint-move { font-size: 26px; font-weight: 700; color: var(--good); }
+  .hint-move small { font-size: 13px; font-weight: 500; color: var(--muted); }
+  .hint-line { color: var(--muted); font-size: 13px; margin-top: 4px; word-break: break-word; }
+  .hint-alt { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .placeholder { color: var(--muted); font-size: 13px; }
+  .err { color: var(--bad); }
+
+  .row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  button {
+    flex: 1; min-width: 84px; padding: 9px 10px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--line); background: #262b34; color: var(--ink);
+    font: inherit; font-size: 14px;
+  }
+  button:hover:not(:disabled) { background: #303743; border-color: #3d4552; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #1a1a1a; font-weight: 600; border-color: var(--accent); }
+  button.primary:hover:not(:disabled) { background: #ffc44d; }
+
+  label.opt {
+    display: flex; align-items: center; gap: 8px; color: var(--muted);
+    font-size: 13px; margin: 10px 0 4px;
+  }
+  select, input[type=range] { background: #262b34; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px; font: inherit; font-size: 13px; }
+
+  .moves {
+    margin-top: 12px; max-height: 168px; overflow-y: auto; font-size: 13px;
+    background: #1a1d23; border-radius: 7px; padding: 8px 10px; line-height: 1.7;
+  }
+  .moves b { color: var(--muted); font-weight: 500; margin-right: 4px; }
+  .moves .mv { margin-right: 10px; }
+  .foot { margin-top: 12px; color: var(--muted); font-size: 11.5px; }
+  .foot code { background: #1a1d23; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div>
+    <h1>AI-<span>ChessMate</span></h1>
+    <div class="sub">v1.0 &mdash; digital board, Stockfish tells you the next move</div>
+    <div class="board-wrap">
+      <div class="evalbar" title="Evaluation, White at the bottom">
+        <div class="white" id="evalwhite"></div>
+      </div>
+      <div class="board" id="board">
+        <svg id="arrows" viewBox="0 0 8 8"></svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="status" id="status">Loading&hellip;</div>
+
+    <div class="hint-box" id="hintbox">
+      <div class="placeholder">Press <b>Hint</b> and Stockfish will name the next move.</div>
+    </div>
+
+    <div class="row">
+      <button class="primary" id="btn-hint">Hint</button>
+      <button id="btn-play">Engine plays</button>
+    </div>
+    <div class="row">
+      <button id="btn-undo">Undo</button>
+      <button id="btn-flip">Flip</button>
+      <button id="btn-new">New game</button>
+    </div>
+
+    <label class="opt">
+      <input type="checkbox" id="opt-auto"> Engine answers my moves
+    </label>
+    <label class="opt">
+      Think time
+      <select id="opt-movetime">
+        <option value="100">100 ms</option>
+        <option value="300" selected>300 ms</option>
+        <option value="1000">1 s</option>
+        <option value="3000">3 s</option>
+      </select>
+      Strength
+      <select id="opt-skill">
+        <option value="">full</option>
+        <option value="3">easy</option>
+        <option value="8">club</option>
+        <option value="14">strong</option>
+      </select>
+    </label>
+
+    <div class="moves" id="moves"></div>
+    <div class="foot">
+      Click a piece, then its destination. Engine: <code id="enginepath">&hellip;</code>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ---- state ------------------------------------------------------------
+const FILES = "abcdefgh";
+const GLYPH = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+
+let state = null;      // last /api/state payload
+let selected = null;   // square name the user clicked first
+let flipped = false;   // true when Black is at the bottom
+let hint = null;       // last hint payload, for the arrow
+let busy = false;
+
+const $ = (id) => document.getElementById(id);
+const boardEl = $("board");
+const arrowsEl = $("arrows");
+
+// ---- server -----------------------------------------------------------
+async function api(path, body) {
+  const opts = body === undefined
+    ? {}
+    : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({ ok: false, error: "bad response" }));
+  if (!data.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+
+function setBusy(on) {
+  busy = on;
+  for (const id of ["btn-hint", "btn-play", "btn-undo", "btn-new", "btn-flip"]) $(id).disabled = on;
+}
+
+// ---- rendering --------------------------------------------------------
+
+/** Expand the piece-placement field of a FEN into 64 entries, a8 first. */
+function fenBoard(fen) {
+  const rows = fen.split(" ")[0].split("/");
+  const out = {};
+  rows.forEach((row, r) => {
+    let f = 0;
+    for (const ch of row) {
+      if (ch >= "1" && ch <= "8") { f += +ch; continue; }
+      out[FILES[f] + (8 - r)] = ch;
+      f += 1;
+    }
+  });
+  return out;
+}
+
+/** Board order for the current orientation: index 0 is the top-left square. */
+function squareOrder() {
+  const squares = [];
+  const ranks = flipped ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1];
+  const files = flipped ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
+  for (const rank of ranks) for (const f of files) squares.push(FILES[f] + rank);
+  return squares;
+}
+
+function render() {
+  if (!state) return;
+  const pieces = fenBoard(state.fen);
+  const targets = (selected && state.legal[selected]) || [];
+  const last = state.last_move;
+
+  // Rebuild the grid but keep the SVG overlay, which lives inside .board.
+  for (const el of [...boardEl.querySelectorAll(".sq")]) el.remove();
+
+  squareOrder().forEach((name) => {
+    const file = FILES.indexOf(name[0]);
+    const rank = +name[1];
+    const sq = document.createElement("div");
+    sq.className = "sq " + ((file + rank) % 2 === 0 ? "dark" : "light");
+    sq.dataset.square = name;
+
+    if (name === selected) sq.classList.add("sel");
+    else if (last && (name === last.from || name === last.to)) sq.classList.add("last");
+    if (state.check_square === name) sq.classList.add("check");
+
+    const code = pieces[name];
+    if (code) {
+      const span = document.createElement("span");
+      span.className = "piece " + (code === code.toUpperCase() ? "w" : "b");
+      span.textContent = GLYPH[code.toLowerCase()];
+      sq.appendChild(span);
+    }
+    if (targets.includes(name)) {
+      const dot = document.createElement("div");
+      dot.className = code ? "dot capture" : "dot";
+      sq.appendChild(dot);
+    }
+    // Coordinates on the outer edge only, like a real board.
+    const bottomRank = flipped ? 8 : 1;
+    const leftFile = flipped ? 7 : 0;
+    if (rank === bottomRank) {
+      const c = document.createElement("div");
+      c.className = "coord file"; c.textContent = name[0]; sq.appendChild(c);
+    }
+    if (file === leftFile) {
+      const c = document.createElement("div");
+      c.className = "coord rank"; c.textContent = rank; sq.appendChild(c);
+    }
+    boardEl.insertBefore(sq, arrowsEl);
+  });
+
+  $("status").textContent = state.status;
+  $("btn-undo").disabled = busy || !state.can_undo;
+  $("btn-hint").disabled = busy || state.over;
+  $("btn-play").disabled = busy || state.over;
+  renderMoves();
+  drawArrow();
+}
+
+function renderMoves() {
+  const box = $("moves");
+  const h = state.history;
+  if (!h.length) { box.innerHTML = '<span class="placeholder">No moves yet.</span>'; return; }
+  let html = "";
+  for (let i = 0; i < h.length; i += 2) {
+    html += `<b>${i / 2 + 1}.</b><span class="mv">${h[i]}</span>`;
+    if (h[i + 1]) html += `<span class="mv">${h[i + 1]}</span>`;
+  }
+  box.innerHTML = html;
+  box.scrollTop = box.scrollHeight;
+}
+
+/** Centre of a square in the 0..8 SVG coordinate system, honouring the flip. */
+function centre(name) {
+  const file = FILES.indexOf(name[0]);
+  const rank = +name[1];
+  const x = flipped ? 7 - file : file;
+  const y = flipped ? rank - 1 : 8 - rank;
+  return { x: x + 0.5, y: y + 0.5 };
+}
+
+function drawArrow() {
+  arrowsEl.innerHTML = "";
+  if (!hint) return;
+  const a = centre(hint.best.from);
+  const b = centre(hint.best.to);
+
+  const NS = "http://www.w3.org/2000/svg";
+  const defs = document.createElementNS(NS, "defs");
+  defs.innerHTML =
+    '<marker id="h" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">' +
+    '<path d="M0,1 L9,5 L0,9 z" fill="rgba(80,190,110,.92)"/></marker>';
+  arrowsEl.appendChild(defs);
+
+  // Stop short of the destination centre so the arrowhead sits on the square.
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const line = document.createElementNS(NS, "line");
+  line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
+  line.setAttribute("x2", b.x - (dx / len) * 0.28);
+  line.setAttribute("y2", b.y - (dy / len) * 0.28);
+  line.setAttribute("stroke", "rgba(80,190,110,.92)");
+  line.setAttribute("stroke-width", "0.13");
+  line.setAttribute("stroke-linecap", "round");
+  line.setAttribute("marker-end", "url(#h)");
+  arrowsEl.appendChild(line);
+}
+
+function showHint(data) {
+  hint = data;
+  const alts = data.alternatives.length
+    ? "also: " + data.alternatives.map((c) => `${c.san} (${(-c.loss / 100).toFixed(2)})`).join(", ")
+    : "";
+  $("hintbox").innerHTML =
+    `<div class="hint-move">${data.best.san} <small>${data.best.uci}</small></div>` +
+    `<div class="hint-line">eval ${data.eval} &middot; ${data.elapsed_ms} ms` +
+    (data.cached ? " (cached)" : "") + `</div>` +
+    `<div class="hint-line">line: ${data.best.pv.slice(0, 6).join(" ")}</div>` +
+    (alts ? `<div class="hint-alt">${alts}</div>` : "");
+  const pct = Math.max(2, Math.min(98, 50 + data.eval_pawns * 5));
+  $("evalwhite").style.height = pct + "%";
+}
+
+function showError(msg) {
+  $("hintbox").innerHTML = `<div class="err">${msg}</div>`;
+}
+
+// ---- actions ----------------------------------------------------------
+const movetime = () => +$("opt-movetime").value;
+const skill = () => ($("opt-skill").value === "" ? null : +$("opt-skill").value);
+
+function accept(data) {
+  state = data;
+  selected = null;
+  hint = null;          // the position changed; the old arrow is now a lie
+  render();
+}
+
+async function refresh() {
+  accept(await api("/api/state"));
+}
+
+async function doMove(uci) {
+  setBusy(true);
+  try {
+    accept(await api("/api/move", { move: uci }));
+    if ($("opt-auto").checked && !state.over) await enginePlay();
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    setBusy(false);
+    render();
+  }
+}
+
+async function enginePlay() {
+  const data = await api("/api/engine-move", { movetime: movetime(), skill: skill() });
+  const played = data.played;
+  accept(data);
+  $("hintbox").innerHTML = `<div class="hint-line">Engine played <b>${played}</b>.</div>`;
+}
+
+async function onSquare(name) {
+  if (busy || !state || state.over) return;
+  const movable = state.legal[selected];
+  if (selected && movable && movable.includes(name)) {
+    await doMove(selected + name);
+    return;
+  }
+  selected = state.legal[name] ? name : null;
+  render();
+}
+
+// ---- wiring -----------------------------------------------------------
+boardEl.addEventListener("click", (ev) => {
+  const sq = ev.target.closest(".sq");
+  if (sq) onSquare(sq.dataset.square);
+});
+
+$("btn-hint").addEventListener("click", async () => {
+  setBusy(true);
+  $("hintbox").innerHTML = '<div class="placeholder">Thinking&hellip;</div>';
+  try {
+    showHint(await api("/api/hint", { movetime: movetime(), multipv: 3 }));
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    setBusy(false);
+    render();
+  }
+});
+
+$("btn-play").addEventListener("click", async () => {
+  setBusy(true);
+  try { await enginePlay(); } catch (e) { showError(e.message); }
+  finally { setBusy(false); render(); }
+});
+
+$("btn-undo").addEventListener("click", async () => {
+  setBusy(true);
+  try { accept(await api("/api/undo", { full: $("opt-auto").checked })); }
+  catch (e) { showError(e.message); }
+  finally { setBusy(false); render(); }
+});
+
+$("btn-new").addEventListener("click", async () => {
+  setBusy(true);
+  try {
+    accept(await api("/api/new", {}));
+    $("hintbox").innerHTML = '<div class="placeholder">New game. White to move.</div>';
+    $("evalwhite").style.height = "50%";
+  } catch (e) { showError(e.message); }
+  finally { setBusy(false); render(); }
+});
+
+$("btn-flip").addEventListener("click", () => { flipped = !flipped; render(); });
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.target.tagName === "SELECT" || ev.target.tagName === "INPUT") return;
+  if (ev.key === "h" || ev.key === "H") $("btn-hint").click();
+  if (ev.key === "u" || ev.key === "U") $("btn-undo").click();
+  if (ev.key === "f" || ev.key === "F") $("btn-flip").click();
+});
+
+(async function start() {
+  try {
+    const health = await api("/api/health");
+    $("enginepath").textContent = health.engine;
+    // Only adopt the server's default when it is one of the offered values --
+    // an unmatched value blanks the <select> and movetime() would go NaN.
+    const sel = $("opt-movetime");
+    if ([...sel.options].some((o) => o.value === String(health.movetime_ms))) {
+      sel.value = String(health.movetime_ms);
+    }
+  } catch (e) { /* the board still works without it */ }
+  await refresh();
+})();
+</script>
+</body>
+</html>

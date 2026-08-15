@@ -1,0 +1,19 @@
+# The Stockfish binary is ~80 MB and platform-specific -- tools/get_stockfish.py
+# fetches it. Never commit it.
+# (excluding "engine/" itself would make the negation below unreachable -- git
+# never descends into an excluded directory.)
+engine/*
+!engine/.gitkeep
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
