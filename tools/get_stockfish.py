@@ -155,7 +155,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     sys.path.insert(0, str(ROOT))
-    from chess_ai.engine import find_binary  # noqa: E402 - needs ROOT on the path
+    from digital_board.engine import find_binary  # noqa: E402 - needs ROOT on the path
 
     existing = find_binary()
     if args.check:

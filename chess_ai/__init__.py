@@ -1,34 +1,23 @@
-"""AI-ChessMate -- a digital chessboard with a Stockfish hint on demand.
+"""chess_ai — Huấn luyện viên cờ vua qua camera, chạy trên AIBOX 8550.
 
-Version 1.0 is deliberately small: a board you can play on in the browser and an
-engine that will tell you the next move when asked.  Board *vision* (reading a
-physical board through a camera) is the next milestone, not this one.
+Toàn cảnh cách hoạt động: xem SOLUTION.md ở gốc dự án.
 
-Public surface:
+Thị giác — dựng lại thế cờ từ khung hình camera:
+  rectify     dò khung bàn, nắn thẳng, bám 4 góc real-time
+  gridfind    căn lưới 8×8 trên ảnh đã nắn, ngưỡng ô có quân/trống
+  piece_net   CNN đọc quân — ONNX trên CPU, QNN trên NPU Hexagon
+  tracker3    BÁM NƯỚC ĐI: đọc 64 ô → so với thế cờ đang giữ → lọc bằng luật cờ
+  reader      các hàm suy luận thế cờ, tách rời camera nên test được độc lập
+  vision      tiện ích camera
 
-    from chess_ai import Game, Engine, find_binary
+Cờ vua — biến thế cờ thành lời khuyên:
+  engine      bọc Stockfish (đi nước + phân tích)
+  analysis    phân tích thế trận
+  commentary  sinh lời bình cho từng nước đi
+  render      vẽ bàn cờ đối chiếu để soi bằng mắt
+  speaker     đọc to
+  llm         nối mô hình ngôn ngữ (chưa dùng trong đường chạy chính)
+
+Các hướng đã thử trước đó nằm ở archive/.
 """
-
-from __future__ import annotations
-
 __version__ = "1.0.0"
-
-from .engine import (
-    Candidate,
-    Engine,
-    EngineUnavailable,
-    Hint,
-    find_binary,
-)
-from .game import Game, MoveRejected
-
-__all__ = [
-    "__version__",
-    "Candidate",
-    "Engine",
-    "EngineUnavailable",
-    "Game",
-    "Hint",
-    "MoveRejected",
-    "find_binary",
-]

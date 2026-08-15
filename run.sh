@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # AI-ChessMate v1.0 -- digital board + Stockfish hints.
 #   ./run.sh                 start on http://127.0.0.1:8090
-#   ./run.sh --port 9000     any chess_ai.server flag is passed straight through
+#   ./run.sh --port 9000     any digital_board.server flag is passed straight through
 set -e
 cd "$(dirname "$0")"
 
@@ -19,4 +19,4 @@ command -v "$PY" >/dev/null 2>&1 || { echo "[x] python not found"; exit 1; }
   "$PY" tools/get_stockfish.py
 }
 
-exec "$PY" -m chess_ai.server "$@"
+exec "$PY" -m digital_board.server "$@"

@@ -1,19 +1,20 @@
-# The Stockfish binary is ~80 MB and platform-specific -- tools/get_stockfish.py
-# fetches it. Never commit it.
-# (excluding "engine/" itself would make the negation below unreachable -- git
-# never descends into an excluded directory.)
+# --- sinh ra lúc chạy ---
+__pycache__/
+*.pyc
+*.log
+.venv/
+qnnenv/
+
+# --- dữ liệu nặng: KHÔNG đưa lên git ---
+# dataset tự dump khi nhận diện khớp 100% (xem SOLUTION.md), có thể lên tới hàng GB
+captures/dataset/
+# ảnh/âm thanh sinh ra lúc chạy; chỉ vài ảnh mẫu trong tests/frames là được theo dõi
+captures/
+!tests/frames/
+
+# --- v1.0 bàn cờ số (digital_board) ---
+# Binary Stockfish ~80 MB, theo nền tảng, GPL-3 -> tools/get_stockfish.py tự tải.
+# Phải viết "engine/*" chứ không phải "engine/": git không đi vào thư mục đã loại
+# nên dòng phủ định bên dưới sẽ không bao giờ chạy.
 engine/*
 !engine/.gitkeep
-
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-env/
-*.egg-info/
-.pytest_cache/
-
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db

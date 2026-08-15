@@ -1,7 +1,7 @@
 @echo off
 REM AI-ChessMate v1.0 -- digital board + Stockfish hints.
 REM   run.bat                 start on http://127.0.0.1:8090 and open a browser
-REM   run.bat --port 9000     any chess_ai.server flag is passed straight through
+REM   run.bat --port 9000     any digital_board.server flag is passed straight through
 REM   run.bat --no-browser
 setlocal
 cd /d "%~dp0"
@@ -26,4 +26,4 @@ if errorlevel 1 (
   python tools\get_stockfish.py || exit /b 1
 )
 
-python -m chess_ai.server %*
+python -m digital_board.server %*

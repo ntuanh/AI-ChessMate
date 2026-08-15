@@ -1,3 +1,11 @@
-# AI-ChessMate v1.0 -- runtime dependencies.
-# Everything else (HTTP server, JSON, the board UI) is standard library.
-chess>=1.10
+# Python packages (đã cài trên AIBOX). Cài lại nếu cần:
+#   pip3 install -r requirements.txt   (qua proxy nếu AIBOX chưa có mạng)
+chess>=1.11
+numpy>=1.21
+# opencv-python đã có sẵn bản hệ thống (cv2 4.13) trên AIBOX — không cần cài lại
+# vosk  # (tùy chọn) nhận diện giọng nói offline - phần đối thoại bằng mic
+
+# --- Gói hệ thống (apt / .deb), KHÔNG qua pip ---
+#   stockfish     -> /usr/games/stockfish   (engine cờ)
+#   espeak-ng     -> đọc to (TTS)
+#   alsa-utils    -> aplay (phát âm thanh)
