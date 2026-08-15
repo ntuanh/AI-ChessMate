@@ -31,6 +31,21 @@ bash tools/run_aibox.sh         # hàng ngày: đẩy code mới + khởi độn
 
 Rồi mở `http://127.0.0.1:8090`.
 
+## Bàn cờ số (v1.0) — không cần camera, không cần AIBOX
+
+Nửa còn lại của repo: bàn cờ trên trình duyệt, bấm chuột để đi, Stockfish gợi ý
+nước tiếp theo. Chạy được trên máy thường (Windows/macOS/Linux), chỉ cần
+`python-chess` — dùng để demo và để thử engine khi chưa có phần cứng.
+
+```bash
+run.bat                     # Windows
+./run.sh                    # Linux / macOS
+python tests/test_digital_board.py   # 63 phép thử
+```
+
+Chi tiết: [docs/DIGITAL_BOARD.md](docs/DIGITAL_BOARD.md). Hai nửa **không import
+nhau** và cùng dùng cổng 8090, nên chạy lần lượt từng cái.
+
 ## Kiểm chứng — không cần camera
 
 ```bash
@@ -42,11 +57,12 @@ python3 tools/replay_server.py --moves    # chấm khả năng bắt đúng nư�
 ## Cấu trúc
 
 ```
-chess_ai/     thư viện lõi (thị giác, mô hình, bám nước đi, engine)
-tools/        máy chủ web, sidecar NPU, script dựng và triển khai
-tests/        bộ thử tự động + ảnh mẫu
-docs/         hướng dẫn phụ
-archive/      các hướng đã thử trước đó, giữ để tham khảo
+chess_ai/       thư viện lõi (thị giác, mô hình, bám nước đi, engine)
+digital_board/  bàn cờ số trên trình duyệt (v1.0), không camera, không model
+tools/          máy chủ web, sidecar NPU, script dựng và triển khai
+tests/          bộ thử tự động + ảnh mẫu
+docs/           hướng dẫn phụ
+archive/        các hướng đã thử trước đó, giữ để tham khảo
 ```
 
 Chi tiết từng file: xem mục 9 của [SOLUTION.md](SOLUTION.md).

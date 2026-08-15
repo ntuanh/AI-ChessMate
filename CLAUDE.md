@@ -293,6 +293,33 @@ Xếp theo mức thiệt hại. 1–3 là vỏ thuần, tổng ~20 dòng, đánh
 đổi độ chính xác, mà chủ dự án đã yêu cầu rõ độ chính xác phải luôn được giữ. Mục 1–3
 lấy lại phần lớn thời gian đó mà không nới chốt chặn nào.
 
+## Bàn cờ số `digital_board/` (v1.0) — nửa không cần phần cứng
+
+Bàn cờ trên trình duyệt, bấm chuột để đi, Stockfish gợi ý nước tiếp theo. Chạy trên
+máy thường, chỉ phụ thuộc `python-chess`. Chi tiết: `docs/DIGITAL_BOARD.md`.
+
+```bash
+run.bat / ./run.sh                    # tự cài dep + tải Stockfish + mở :8090
+python -m digital_board.server --port 8090 --movetime 300 --no-browser
+python tools/get_stockfish.py --from <path>   # có sẵn binary thì khỏi tải
+python tests/test_digital_board.py    # 63 phép thử, exit 0 là đạt
+```
+
+- **Hai nửa KHÔNG import nhau.** `chess_ai/` = camera + NPU trên AIBOX;
+  `digital_board/` = bàn cờ số. Cả hai cùng cổng 8090 → chạy lần lượt.
+- **Cố ý có hai lớp bọc Stockfish.** `chess_ai.engine.ChessEngine` đóng đinh
+  `/usr/games/stockfish`, không cache, không có `loss` → không chạy được trên Windows,
+  nơi bàn cờ số phải chạy khi chưa có phần cứng. Chỗ duy nhất hai bên gặp nhau là
+  `digital_board.engine.find_binary()`, có đọc `chess_ai.config.STOCKFISH_PATH` (trong
+  `try/except`, vì máy chạy bàn cờ số không có `cv2`) để trên AIBOX dùng chung binary.
+- **Binary Stockfish KHÔNG commit** (~80 MB, GPL-3, theo nền tảng). `engine/` bị
+  gitignore; `tools/get_stockfish.py` tra releases API chứ không đóng đinh URL vì tag
+  có đổi (`sf_17` → `sf_18`).
+- **`.gitignore` phải viết `engine/*` chứ không phải `engine/`** — git không đi vào thư
+  mục đã loại nên `!engine/.gitkeep` sẽ không bao giờ có tác dụng.
+- Đo được: gợi ý ở movetime 300 ms ≈ 550 ms trọn vòng lúc nguội, lần lặp lại ~0 ms và
+  báo `cached`. `1.e4 c5` → `Nf3`, eval +0.38.
+
 ## Ràng buộc
 
 - **NGHIÊM CẤM xoá user trên AIBOX** — không `userdel`/`deluser`, không xoá home của
